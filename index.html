@@ -31,6 +31,10 @@
     display:flex; align-items:flex-start; justify-content:space-between;
     margin-bottom:6px;
   }
+  .version{
+    font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    letter-spacing:0.05em; padding-top:2px;
+  }
   h1{
     font-size:15px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
     margin:0; color:var(--text);
@@ -142,6 +146,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
+    <span class="version">v1.0</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -195,7 +200,7 @@
 
 <script>
 const TRACKS = [
-  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7, band:'low',  dur:0.35, rate:1   },
+  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7, band:'low',  dur:0.35, rate:0.25, gain:1.5 },
   { id:'hat',   name:'Cl Hat',  type:'perc', filterType:'highpass', freq:6000, q:0.7, band:'high', dur:0.08, rate:1   },
   { id:'ride',  name:'Ride',    type:'perc', filterType:'highpass', freq:4000, q:0.7, band:'high', dur:1.5,  rate:1   },
   { id:'snare', name:'Snare',   type:'perc', filterType:'bandpass', freq:2500, q:1.0, band:'mid',  dur:0.4,  rate:1   },
@@ -326,7 +331,7 @@ function playStep(trackId, time) {
 
   const env = audioCtx.createGain();
   env.gain.setValueAtTime(0, time);
-  env.gain.linearRampToValueAtTime(1, time + 0.004);
+  env.gain.linearRampToValueAtTime(track.gain || 1, time + 0.004);
 
   src.connect(filter);
   filter.connect(env);
@@ -674,7 +679,7 @@ function playCapturedStep(track, matchEntry, time) {
 
   const env = audioCtx.createGain();
   env.gain.setValueAtTime(0, time);
-  env.gain.linearRampToValueAtTime(1, time + 0.004);
+  env.gain.linearRampToValueAtTime(track.gain || 1, time + 0.004);
   env.gain.exponentialRampToValueAtTime(0.001, time + clipSec);
 
   src.connect(filter);
