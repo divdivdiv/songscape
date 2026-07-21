@@ -167,9 +167,9 @@
     <div class="hold-row">
       <div class="tempo-row">
         <span class="tempo-label">Hold</span>
-        <span class="tempo-value" id="holdValue">3.0s</span>
+        <span class="tempo-value" id="holdValue">3s</span>
       </div>
-      <input type="range" id="holdSlider" min="1" max="12" step="0.5" value="3">
+      <input type="range" id="holdSlider" min="1" max="13" step="1" value="3">
     </div>
     <div class="meters">
       <div class="meter-col">
@@ -195,12 +195,12 @@
 
 <script>
 const TRACKS = [
-  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7, band:'low'  },
-  { id:'hat',   name:'Cl Hat',  type:'perc', filterType:'highpass', freq:6000, q:0.7, band:'high' },
-  { id:'ride',  name:'Ride',    type:'perc', filterType:'highpass', freq:4000, q:0.7, band:'high' },
-  { id:'snare', name:'Snare',   type:'perc', filterType:'bandpass', freq:2500, q:1.0, band:'mid'  },
-  { id:'bass',  name:'Bass',    type:'mel',  filterType:'lowpass',  freq:900,  q:0.7, band:'low'  },
-  { id:'lead',  name:'Lead',    type:'mel',  filterType:'bandpass', freq:3000, q:0.6, band:'mid'  },
+  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7, band:'low',  dur:0.35, rate:1   },
+  { id:'hat',   name:'Cl Hat',  type:'perc', filterType:'highpass', freq:6000, q:0.7, band:'high', dur:0.08, rate:1   },
+  { id:'ride',  name:'Ride',    type:'perc', filterType:'highpass', freq:4000, q:0.7, band:'high', dur:1.5,  rate:1   },
+  { id:'snare', name:'Snare',   type:'perc', filterType:'bandpass', freq:2500, q:1.0, band:'mid',  dur:0.4,  rate:1   },
+  { id:'bass',  name:'Bass',    type:'mel',  filterType:'lowpass',  freq:900,  q:0.7, band:'low',  dur:0.75, rate:0.5 },
+  { id:'lead',  name:'Lead',    type:'mel',  filterType:'bandpass', freq:3000, q:0.6, band:'mid',  dur:0.6,  rate:1   },
 ];
 
 // A simple starter pattern so play sounds like something immediately
@@ -230,12 +230,8 @@ function initAudio() {
   masterGain = audioCtx.createGain();
   masterGain.gain.value = 0.85;
   masterGain.connect(audioCtx.destination);
-  buffers.kick  = renderBuffer(0.35, kickFill);
-  buffers.snare = renderBuffer(0.2,  snareFill);
-  buffers.hat   = renderBuffer(0.08, hatFill);
-  buffers.ride  = renderBuffer(0.6,  rideFill);
-  buffers.bass  = renderBuffer(0.3,  bassFill);
-  buffers.lead  = renderBuffer(0.25, leadFill);
+  const fillFns = { kick: kickFill, snare: snareFill, hat: hatFill, ride: rideFill, bass: bassFill, lead: leadFill };
+  TRACKS.forEach(t => { buffers[t.id] = renderBuffer(t.dur, fillFns[t.id]); });
 }
 
 // --- placeholder sample generators ---
@@ -260,11 +256,21 @@ function kickFill(d, sr, len) {
   }
 }
 function snareFill(d, sr, len) {
+  // Big gated-80s shape: quick attack, held body, then a hard cutoff
+  // instead of a natural decay tail.
+  const gateStart = Math.floor(len * 0.62);
   for (let i = 0; i < len; i++) {
     const t = i / sr;
     const noise = (Math.random() * 2 - 1);
-    const tone = Math.sin(2 * Math.PI * 180 * t) * 0.3;
-    d[i] = (noise * 0.8 + tone) * Math.exp(-t * 14);
+    const tone = Math.sin(2 * Math.PI * 200 * t) * 0.25;
+    let amp;
+    if (i < gateStart) {
+      amp = 1.0 - 0.15 * (i / gateStart);
+    } else {
+      const closeProgress = (i - gateStart) / (len - gateStart);
+      amp = 0.85 * Math.pow(1 - closeProgress, 3);
+    }
+    d[i] = (noise * 0.85 + tone) * amp;
   }
 }
 function hatFill(d, sr, len) {
@@ -274,9 +280,15 @@ function hatFill(d, sr, len) {
   }
 }
 function rideFill(d, sr, len) {
+  // Fast strike transient, shimmering metallic wash, long ~1.5s tail.
   for (let i = 0; i < len; i++) {
     const t = i / sr;
-    d[i] = (Math.random() * 2 - 1) * Math.exp(-t * 3) * 0.7;
+    const noise = (Math.random() * 2 - 1);
+    const tone = Math.sin(2 * Math.PI * 800 * t) * 0.15
+               + Math.sin(2 * Math.PI * 1400 * t) * 0.1
+               + Math.sin(2 * Math.PI * 2300 * t) * 0.08;
+    const amp = Math.exp(-t * 3);
+    d[i] = (noise * 0.6 + tone) * amp;
   }
 }
 function bassFill(d, sr, len) {
@@ -307,8 +319,7 @@ function playStep(trackId, time) {
 
   const src = audioCtx.createBufferSource();
   src.buffer = buf;
-
-  const filter = audioCtx.createBiquadFilter();
+  src.playbackRate.value = track.rate || 1;
   filter.type = track.filterType;
   filter.frequency.value = track.freq;
   filter.Q.value = track.q;
@@ -483,7 +494,7 @@ let silentGain = null;
 // this is what Phase 3 (matching) reads from. The buffer is allocated at
 // a generous fixed max size; holdSec (adjustable live) controls how much
 // of it actually counts as "recent" for matching.
-const MAX_RING_SEC = 15;
+const MAX_RING_SEC = 60;
 let holdSec = 3;
 let ringBuffer = null;
 let ringLen = 0;
@@ -558,7 +569,7 @@ async function startMic() {
       high: avgRange(freqData, bandBins.midEnd, bandBins.highEnd),
       t: audioCtx.currentTime,
     });
-    const cutoff = audioCtx.currentTime - holdSec;
+    const cutoff = holdSec === Infinity ? -Infinity : audioCtx.currentTime - holdSec;
     while (energyHistory.length && energyHistory[0].t < cutoff) energyHistory.shift();
   };
 
@@ -611,8 +622,14 @@ micBtn.addEventListener('click', () => {
 const holdSlider = document.getElementById('holdSlider');
 const holdValue = document.getElementById('holdValue');
 holdSlider.addEventListener('input', () => {
-  holdSec = parseFloat(holdSlider.value);
-  holdValue.textContent = holdSec.toFixed(1) + 's';
+  const v = parseInt(holdSlider.value, 10);
+  if (v >= 13) {
+    holdSec = Infinity;
+    holdValue.textContent = '\u221E';
+  } else {
+    holdSec = v;
+    holdValue.textContent = v + 's';
+  }
 });
 
 // --- Phase 3: matching + captured playback ---
@@ -639,7 +656,7 @@ function extractClip(entry, clipSamples) {
 // Same filter -> envelope chain as playStep(), just fed a live-captured
 // clip instead of a static placeholder buffer.
 function playCapturedStep(track, matchEntry, time) {
-  const clipSec = track.type === 'mel' ? 0.25 : 0.18;
+  const clipSec = track.dur;
   const clipSamples = Math.floor(clipSec * audioCtx.sampleRate);
   const raw = extractClip(matchEntry, clipSamples);
 
@@ -648,6 +665,7 @@ function playCapturedStep(track, matchEntry, time) {
 
   const src = audioCtx.createBufferSource();
   src.buffer = clipBuffer;
+  src.playbackRate.value = track.rate || 1;
 
   const filter = audioCtx.createBiquadFilter();
   filter.type = track.filterType;
