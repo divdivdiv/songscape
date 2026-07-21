@@ -35,6 +35,13 @@
     font-family:var(--mono); font-size:10px; color:var(--text-dim);
     letter-spacing:0.05em; padding-top:2px;
   }
+  .beat-row{ display:flex; gap:6px; margin-bottom:14px; }
+  .beat-btn{
+    flex:1; padding:10px 0; border-radius:9px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text-dim); font-family:var(--mono);
+    font-size:13px; cursor:pointer;
+  }
+  .beat-btn.active{ background:var(--amber-dim); border-color:var(--amber); color:var(--amber); }
   h1{
     font-size:15px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
     margin:0; color:var(--text);
@@ -146,9 +153,16 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v1.2</span>
+    <span class="version">v1.3</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
+
+  <div class="beat-row" id="beatRow">
+    <button class="beat-btn active" data-bank="0">1</button>
+    <button class="beat-btn" data-bank="1">2</button>
+    <button class="beat-btn" data-bank="2">3</button>
+    <button class="beat-btn" data-bank="3">4</button>
+  </div>
 
   <div class="transport">
     <button class="play-btn" id="playBtn" aria-label="Play"></button>
@@ -225,12 +239,18 @@ const DEMO = {
   lead:  [0,0,1,0, 0,1,0,0, 0,0,0,1, 0,1,0,0],
 };
 
-const patterns = {};
+const NUM_BANKS = 4;
+const patternBanks = [];
+for (let b = 0; b < NUM_BANKS; b++) {
+  const bank = {};
+  TRACKS.forEach(t => { bank[t.id] = DEMO[t.id].map(v => !!v); });
+  patternBanks.push(bank);
+}
+let activeBank = 0;
+let patterns = patternBanks[activeBank];
+
 const muted = {};
-TRACKS.forEach(t => {
-  patterns[t.id] = DEMO[t.id].map(v => !!v);
-  muted[t.id] = false;
-});
+TRACKS.forEach(t => { muted[t.id] = false; });
 
 let audioCtx = null;
 let buffers = {};
@@ -491,6 +511,25 @@ TRACKS.forEach(track => {
 
 document.getElementById('playBtn').addEventListener('click', () => {
   if (isPlaying) stop(); else play();
+});
+
+function syncGridToActiveBank() {
+  TRACKS.forEach(t => {
+    for (let i = 0; i < 16; i++) {
+      const el = document.querySelector(`.track[data-track="${t.id}"] .step[data-step="${i}"]`);
+      if (el) el.classList.toggle('on', patterns[t.id][i]);
+    }
+  });
+}
+
+document.querySelectorAll('.beat-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activeBank = parseInt(btn.dataset.bank, 10);
+    patterns = patternBanks[activeBank];
+    document.querySelectorAll('.beat-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    syncGridToActiveBank();
+  });
 });
 
 const tempoSlider = document.getElementById('tempoSlider');
