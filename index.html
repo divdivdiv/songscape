@@ -146,7 +146,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v1.0</span>
+    <span class="version">v1.1</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -175,6 +175,13 @@
         <span class="tempo-value" id="holdValue">3s</span>
       </div>
       <input type="range" id="holdSlider" min="1" max="13" step="1" value="3">
+    </div>
+    <div class="hold-row">
+      <div class="tempo-row">
+        <span class="tempo-label">Input Gain</span>
+        <span class="tempo-value" id="gainValue">100%</span>
+      </div>
+      <input type="range" id="gainSlider" min="0" max="300" step="5" value="100">
     </div>
     <div class="meters">
       <div class="meter-col">
@@ -487,6 +494,8 @@ tempoSlider.addEventListener('input', () => {
 // listening pipeline works before wiring it into step matching.
 let micStream = null;
 let micSource = null;
+let inputGainNode = null;
+let micGain = 1;
 let analyser = null;
 let micActive = false;
 let meterRafId = null;
@@ -529,10 +538,14 @@ async function startMic() {
   }
 
   micSource = audioCtx.createMediaStreamSource(micStream);
+  inputGainNode = audioCtx.createGain();
+  inputGainNode.gain.value = micGain;
+  micSource.connect(inputGainNode);
+
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.6;
-  micSource.connect(analyser);
+  inputGainNode.connect(analyser);
 
   freqData = new Uint8Array(analyser.frequencyBinCount);
   const nyquist = audioCtx.sampleRate / 2;
@@ -553,7 +566,7 @@ async function startMic() {
   // Raw-sample tap: writes continuously into the ring buffer and logs
   // band energy per block so findMatch() can later locate a good moment.
   scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
-  micSource.connect(scriptNode);
+  inputGainNode.connect(scriptNode);
   silentGain = audioCtx.createGain();
   silentGain.gain.value = 0; // must connect to destination to run, but silent
   scriptNode.connect(silentGain);
@@ -591,6 +604,7 @@ function stopMic() {
   if (micStream) micStream.getTracks().forEach(t => t.stop());
   if (scriptNode) { scriptNode.disconnect(); scriptNode.onaudioprocess = null; scriptNode = null; }
   if (silentGain) { silentGain.disconnect(); silentGain = null; }
+  if (inputGainNode) { inputGainNode.disconnect(); inputGainNode = null; }
   energyHistory = [];
   micBtn.textContent = 'Start listening';
   micBtn.classList.remove('active');
@@ -635,6 +649,15 @@ holdSlider.addEventListener('input', () => {
     holdSec = v;
     holdValue.textContent = v + 's';
   }
+});
+
+const gainSlider = document.getElementById('gainSlider');
+const gainValue = document.getElementById('gainValue');
+gainSlider.addEventListener('input', () => {
+  const v = parseInt(gainSlider.value, 10);
+  micGain = v / 100;
+  gainValue.textContent = v + '%';
+  if (inputGainNode) inputGainNode.gain.value = micGain;
 });
 
 // --- Phase 3: matching + captured playback ---
