@@ -102,6 +102,10 @@
   .step.playhead{ box-shadow:0 0 0 1px var(--amber) inset; }
   .step.on.playhead{ background:var(--amber); }
   .track.muted .step.on{ background:#4A4030; border-color:#5A5548; }
+  .step.matched{
+    background:var(--teal) !important; border-color:var(--teal) !important;
+    box-shadow:0 0 6px var(--teal);
+  }
   .footer-note{
     margin-top:20px; font-size:10px; color:var(--text-dim); line-height:1.6;
   }
@@ -183,12 +187,12 @@
 
 <script>
 const TRACKS = [
-  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7 },
-  { id:'hat',   name:'Cl Hat',  type:'perc', filterType:'highpass', freq:6000, q:0.7 },
-  { id:'ride',  name:'Ride',    type:'perc', filterType:'highpass', freq:4000, q:0.7 },
-  { id:'snare', name:'Snare',   type:'perc', filterType:'bandpass', freq:2500, q:1.0 },
-  { id:'bass',  name:'Bass',    type:'mel',  filterType:'lowpass',  freq:900,  q:0.7 },
-  { id:'lead',  name:'Lead',    type:'mel',  filterType:'bandpass', freq:3000, q:0.6 },
+  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7, band:'low'  },
+  { id:'hat',   name:'Cl Hat',  type:'perc', filterType:'highpass', freq:6000, q:0.7, band:'high' },
+  { id:'ride',  name:'Ride',    type:'perc', filterType:'highpass', freq:4000, q:0.7, band:'high' },
+  { id:'snare', name:'Snare',   type:'perc', filterType:'bandpass', freq:2500, q:1.0, band:'mid'  },
+  { id:'bass',  name:'Bass',    type:'mel',  filterType:'lowpass',  freq:900,  q:0.7, band:'low'  },
+  { id:'lead',  name:'Lead',    type:'mel',  filterType:'bandpass', freq:3000, q:0.6, band:'mid'  },
 ];
 
 // A simple starter pattern so play sounds like something immediately
@@ -321,12 +325,23 @@ let timerID = null;
 const lookaheadMs = 25;
 const scheduleAheadSec = 0.1;
 let scheduledNotes = [];
+let matchEvents = [];
 
 function secondsPerStep() { return 60.0 / tempo / 4; }
 
 function scheduleStep(step, time) {
   TRACKS.forEach(t => {
-    if (!muted[t.id] && patterns[t.id][step]) playStep(t.id, time);
+    if (muted[t.id] || !patterns[t.id][step]) return;
+    if (micActive) {
+      const match = findMatch(t);
+      if (match) {
+        playCapturedStep(t, match, time);
+        matchEvents.push({ step, trackId: t.id, time });
+      }
+      // no match found this trigger — deliberately silent, no fallback
+    } else {
+      playStep(t.id, time);
+    }
   });
   scheduledNotes.push({ step, time });
 }
@@ -377,7 +392,18 @@ function drawLoop() {
     document.querySelectorAll('.step.playhead').forEach(el => el.classList.remove('playhead'));
     document.querySelectorAll(`.step[data-step="${displayStep}"]`).forEach(el => el.classList.add('playhead'));
   }
+  matchEvents = matchEvents.filter(ev => {
+    if (ev.time <= now) { flashMatch(ev.trackId, ev.step); return false; }
+    return true;
+  });
   requestAnimationFrame(drawLoop);
+}
+
+function flashMatch(trackId, step) {
+  const el = document.querySelector(`.track[data-track="${trackId}"] .step[data-step="${step}"]`);
+  if (!el) return;
+  el.classList.add('matched');
+  setTimeout(() => el.classList.remove('matched'), 220);
 }
 
 // --- UI build ---
@@ -442,6 +468,17 @@ let micActive = false;
 let meterRafId = null;
 let freqData = null;
 let bandBins = null;
+let scriptNode = null;
+let silentGain = null;
+
+// Rolling buffer of raw mic audio, plus a matching band-energy history —
+// this is what Phase 3 (matching) reads from.
+const RING_SEC = 3;
+let ringBuffer = null;
+let ringLen = 0;
+let writePos = 0;
+let energyHistory = [];
+const MATCH_THRESHOLD = 0.15;
 
 const micBtn = document.getElementById('micBtn');
 const micStatus = document.getElementById('micStatus');
@@ -479,6 +516,41 @@ async function startMic() {
     highEnd: Math.min(analyser.frequencyBinCount - 1, Math.floor(8000 / binHz)),
   };
 
+  if (!ringBuffer) {
+    ringLen = Math.floor(RING_SEC * audioCtx.sampleRate);
+    ringBuffer = new Float32Array(ringLen);
+  }
+  writePos = 0;
+  energyHistory = [];
+
+  // Raw-sample tap: writes continuously into the ring buffer and logs
+  // band energy per block so findMatch() can later locate a good moment.
+  scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  micSource.connect(scriptNode);
+  silentGain = audioCtx.createGain();
+  silentGain.gain.value = 0; // must connect to destination to run, but silent
+  scriptNode.connect(silentGain);
+  silentGain.connect(audioCtx.destination);
+
+  scriptNode.onaudioprocess = (e) => {
+    const input = e.inputBuffer.getChannelData(0);
+    const blockStart = writePos;
+    for (let i = 0; i < input.length; i++) {
+      ringBuffer[writePos] = input[i];
+      writePos = (writePos + 1) % ringLen;
+    }
+    analyser.getByteFrequencyData(freqData);
+    energyHistory.push({
+      writePos: blockStart,
+      low: avgRange(freqData, 0, bandBins.lowEnd),
+      mid: avgRange(freqData, bandBins.lowEnd, bandBins.midEnd),
+      high: avgRange(freqData, bandBins.midEnd, bandBins.highEnd),
+      t: audioCtx.currentTime,
+    });
+    const cutoff = audioCtx.currentTime - RING_SEC;
+    while (energyHistory.length && energyHistory[0].t < cutoff) energyHistory.shift();
+  };
+
   micActive = true;
   micBtn.textContent = 'Stop listening';
   micBtn.classList.add('active');
@@ -490,6 +562,9 @@ function stopMic() {
   micActive = false;
   cancelAnimationFrame(meterRafId);
   if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (scriptNode) { scriptNode.disconnect(); scriptNode.onaudioprocess = null; scriptNode = null; }
+  if (silentGain) { silentGain.disconnect(); silentGain = null; }
+  energyHistory = [];
   micBtn.textContent = 'Start listening';
   micBtn.classList.remove('active');
   setMicStatus('Not listening');
@@ -521,6 +596,57 @@ function meterLoop() {
 micBtn.addEventListener('click', () => {
   if (micActive) stopMic(); else startMic();
 });
+
+// --- Phase 3: matching + captured playback ---
+// Finds the strongest recent moment in the target band, if any is
+// loud enough to count as a real match.
+function findMatch(track) {
+  if (!energyHistory.length) return null;
+  let best = null;
+  for (const entry of energyHistory) {
+    if (!best || entry[track.band] > best[track.band]) best = entry;
+  }
+  if (!best || best[track.band] < MATCH_THRESHOLD) return null;
+  return best;
+}
+
+function extractClip(entry, clipSamples) {
+  const out = new Float32Array(clipSamples);
+  for (let i = 0; i < clipSamples; i++) {
+    out[i] = ringBuffer[(entry.writePos + i) % ringLen];
+  }
+  return out;
+}
+
+// Same filter -> envelope chain as playStep(), just fed a live-captured
+// clip instead of a static placeholder buffer.
+function playCapturedStep(track, matchEntry, time) {
+  const clipSec = track.type === 'mel' ? 0.25 : 0.18;
+  const clipSamples = Math.floor(clipSec * audioCtx.sampleRate);
+  const raw = extractClip(matchEntry, clipSamples);
+
+  const clipBuffer = audioCtx.createBuffer(1, clipSamples, audioCtx.sampleRate);
+  clipBuffer.getChannelData(0).set(raw);
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = clipBuffer;
+
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = track.filterType;
+  filter.frequency.value = track.freq;
+  filter.Q.value = track.q;
+
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(0, time);
+  env.gain.linearRampToValueAtTime(1, time + 0.004);
+  env.gain.exponentialRampToValueAtTime(0.001, time + clipSec);
+
+  src.connect(filter);
+  filter.connect(env);
+  env.connect(masterGain);
+
+  src.start(time);
+}
 </script>
 </body>
 </html>
