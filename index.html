@@ -153,7 +153,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v1.3</span>
+    <span class="version">v1.4</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -229,21 +229,47 @@ const TRACKS = [
   { id:'lead',  name:'Lead',    type:'mel',  filterType:'bandpass', freq:3000, q:0.6, band:'mid',  dur:0.6,  rate:1   },
 ];
 
-// A simple starter pattern so play sounds like something immediately
-const DEMO = {
-  kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
-  hat:   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
-  ride:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
-  snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-  bass:  [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,0,1,0],
-  lead:  [0,0,1,0, 0,1,0,0, 0,0,0,1, 0,1,0,0],
-};
+// Four distinct starter patterns, one per beat slot
+const DEMO_BANKS = [
+  { // Bank 1 — four-on-the-floor
+    kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    hat:   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+    ride:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    bass:  [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,0,1,0],
+    lead:  [0,0,1,0, 0,1,0,0, 0,0,0,1, 0,1,0,0],
+  },
+  { // Bank 2 — syncopated / broken
+    kick:  [1,0,0,1, 0,0,1,0, 0,0,1,0, 0,1,0,0],
+    hat:   [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1],
+    ride:  [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],
+    bass:  [1,0,1,0, 0,1,0,0, 1,0,0,1, 0,1,0,0],
+    lead:  [0,1,0,0, 1,0,0,1, 0,0,1,0, 0,0,1,0],
+  },
+  { // Bank 3 — sparse, half-time
+    kick:  [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+    hat:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    ride:  [0,0,0,0, 0,0,0,1, 0,0,0,0, 0,0,0,1],
+    snare: [0,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+    bass:  [1,0,0,0, 0,0,0,1, 0,0,1,0, 0,0,0,0],
+    lead:  [0,0,0,1, 0,0,1,0, 0,0,0,0, 1,0,0,0],
+  },
+  { // Bank 4 — busy, driving
+    kick:  [1,0,1,0, 1,0,0,1, 1,0,1,0, 1,0,0,1],
+    hat:   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+    ride:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    snare: [0,0,0,0, 1,0,1,0, 0,0,0,0, 1,0,1,0],
+    bass:  [1,1,0,1, 1,0,1,1, 1,1,0,1, 1,0,1,1],
+    lead:  [1,0,1,1, 0,1,0,1, 1,0,1,0, 1,1,0,1],
+  },
+];
 
 const NUM_BANKS = 4;
 const patternBanks = [];
 for (let b = 0; b < NUM_BANKS; b++) {
   const bank = {};
-  TRACKS.forEach(t => { bank[t.id] = DEMO[t.id].map(v => !!v); });
+  TRACKS.forEach(t => { bank[t.id] = DEMO_BANKS[b][t.id].map(v => !!v); });
   patternBanks.push(bank);
 }
 let activeBank = 0;
