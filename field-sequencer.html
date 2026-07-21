@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Field Sequencer</title>
+<style>
+  :root{
+    --bg: #17140F;
+    --panel: #211D16;
+    --panel-2: #2A251C;
+    --line: #3A3327;
+    --amber: #E8A33D;
+    --amber-dim: #6B5628;
+    --teal: #4F8A82;
+    --text: #EDE7DA;
+    --text-dim: #9C9686;
+    --mono: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body{
+    margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:var(--sans); touch-action:manipulation;
+    min-height:100vh;
+  }
+  .shell{
+    max-width:520px; margin:0 auto; padding:18px 10px 40px;
+  }
+  .header{
+    display:flex; align-items:flex-start; justify-content:space-between;
+    margin-bottom:6px;
+  }
+  h1{
+    font-size:15px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase;
+    margin:0; color:var(--text);
+  }
+  .subtitle{
+    font-size:11px; color:var(--text-dim); line-height:1.5; margin:6px 0 18px;
+    max-width:340px;
+  }
+  .transport{
+    display:flex; align-items:center; gap:14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:12px 14px; margin-bottom:18px;
+  }
+  .play-btn{
+    width:52px; height:52px; border-radius:50%; border:1px solid var(--amber-dim);
+    background:var(--panel-2); color:var(--amber); font-size:0; position:relative;
+    flex-shrink:0; cursor:pointer;
+  }
+  .play-btn::after{
+    content:''; position:absolute; top:50%; left:50%;
+    transform:translate(-40%,-50%);
+    border-style:solid; border-width:8px 0 8px 14px;
+    border-color:transparent transparent transparent var(--amber);
+  }
+  .play-btn.playing::after{
+    border-style:none; width:5px; height:16px; background:var(--amber);
+    box-shadow:7px 0 0 var(--amber);
+    transform:translate(-50%,-50%);
+    border-radius:1px;
+  }
+  .tempo{ flex:1; }
+  .tempo-row{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+  .tempo-label{ font-size:10px; letter-spacing:0.12em; color:var(--text-dim); text-transform:uppercase; }
+  .tempo-value{ font-family:var(--mono); font-size:15px; color:var(--amber); }
+  input[type="range"]{
+    -webkit-appearance:none; width:100%; height:3px; background:var(--line);
+    border-radius:2px; outline:none;
+  }
+  input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:var(--amber); cursor:pointer; border:2px solid var(--bg);
+  }
+  .tracks{ display:flex; flex-direction:column; gap:7px; }
+  .track{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:6px 8px; display:flex; flex-direction:column; gap:4px;
+  }
+  .track-header{ display:flex; align-items:center; }
+  .track-label{
+    flex-shrink:0; font-size:10px; letter-spacing:0.06em;
+    text-transform:uppercase; color:var(--text-dim); cursor:pointer;
+    line-height:1.3; padding:2px 0;
+  }
+  .track-label .dot{
+    display:inline-block; width:5px; height:5px; border-radius:50%;
+    background:var(--teal); margin-right:4px; vertical-align:middle;
+  }
+  .track.muted .track-label{ color:#5A5548; text-decoration:line-through; }
+  .track.muted .track-label .dot{ background:#5A5548; }
+  .track.melodic .track-label .dot{ background:var(--amber); }
+  .grid-row{ display:flex; gap:6px; flex:1; width:100%; }
+  .quad{ display:grid; grid-template-columns:repeat(4,1fr); gap:2px; flex:1; }
+  .step{
+    aspect-ratio:1; min-height:15px; border-radius:3px;
+    background:var(--panel-2); border:1px solid var(--line);
+    cursor:pointer;
+  }
+  .step.on{ background:var(--amber-dim); border-color:var(--amber); }
+  .step.playhead{ box-shadow:0 0 0 1px var(--amber) inset; }
+  .step.on.playhead{ background:var(--amber); }
+  .track.muted .step.on{ background:#4A4030; border-color:#5A5548; }
+  .footer-note{
+    margin-top:20px; font-size:10px; color:var(--text-dim); line-height:1.6;
+  }
+  .env-panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:14px; margin-top:18px;
+  }
+  .env-header{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+  .mic-status{ font-size:10px; color:var(--text-dim); }
+  .mic-status.live{ color:var(--teal); }
+  .mic-status.denied{ color:#C0665C; }
+  .mic-btn{
+    width:100%; padding:11px; border-radius:10px; border:1px solid var(--amber-dim);
+    background:var(--panel-2); color:var(--amber); font-size:11px;
+    letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; margin-bottom:14px;
+  }
+  .mic-btn.active{ background:var(--amber-dim); color:var(--bg); }
+  .meters{ display:flex; justify-content:space-around; align-items:flex-end; gap:16px; }
+  .meter-col{ display:flex; flex-direction:column; align-items:center; gap:6px; flex:1; }
+  .meter-track{
+    width:100%; max-width:48px; height:90px; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:6px; position:relative; overflow:hidden;
+  }
+  .meter-fill{
+    position:absolute; bottom:0; left:0; width:100%; height:0%;
+    background:var(--teal); transition:height 70ms linear;
+  }
+  .meter-label{ font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); }
+  .meter-val{ font-family:var(--mono); font-size:10px; color:var(--text); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="header">
+    <h1>Field Sequencer</h1>
+  </div>
+  <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
+
+  <div class="transport">
+    <button class="play-btn" id="playBtn" aria-label="Play"></button>
+    <div class="tempo">
+      <div class="tempo-row">
+        <span class="tempo-label">Tempo</span>
+        <span class="tempo-value" id="tempoValue">112 bpm</span>
+      </div>
+      <input type="range" id="tempoSlider" min="70" max="140" value="112">
+    </div>
+  </div>
+
+  <div class="tracks" id="tracks"></div>
+
+  <div class="env-panel">
+    <div class="env-header">
+      <span class="tempo-label">Environment</span>
+      <span class="mic-status" id="micStatus">Not listening</span>
+    </div>
+    <button class="mic-btn" id="micBtn">Start listening</button>
+    <div class="meters">
+      <div class="meter-col">
+        <span class="meter-val" id="meter-low-val">0%</span>
+        <div class="meter-track"><div class="meter-fill" id="meter-low"></div></div>
+        <span class="meter-label">Low</span>
+      </div>
+      <div class="meter-col">
+        <span class="meter-val" id="meter-mid-val">0%</span>
+        <div class="meter-track"><div class="meter-fill" id="meter-mid"></div></div>
+        <span class="meter-label">Mid</span>
+      </div>
+      <div class="meter-col">
+        <span class="meter-val" id="meter-high-val">0%</span>
+        <div class="meter-track"><div class="meter-fill" id="meter-high"></div></div>
+        <span class="meter-label">High</span>
+      </div>
+    </div>
+  </div>
+
+  <p class="footer-note">Tap a track name to mute it. Tap steps to build a pattern — grouped in 4s, like LSDJ / Koala Sampler.</p>
+</div>
+
+<script>
+const TRACKS = [
+  { id:'kick',  name:'Kick',    type:'perc', filterType:'lowpass',  freq:400,  q:0.7 },
+  { id:'hat',   name:'Cl Hat',  type:'perc', filterType:'highpass', freq:6000, q:0.7 },
+  { id:'ride',  name:'Ride',    type:'perc', filterType:'highpass', freq:4000, q:0.7 },
+  { id:'snare', name:'Snare',   type:'perc', filterType:'bandpass', freq:2500, q:1.0 },
+  { id:'bass',  name:'Bass',    type:'mel',  filterType:'lowpass',  freq:900,  q:0.7 },
+  { id:'lead',  name:'Lead',    type:'mel',  filterType:'bandpass', freq:3000, q:0.6 },
+];
+
+// A simple starter pattern so play sounds like something immediately
+const DEMO = {
+  kick:  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+  hat:   [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+  ride:  [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+  snare: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+  bass:  [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,0,1,0],
+  lead:  [0,0,1,0, 0,1,0,0, 0,0,0,1, 0,1,0,0],
+};
+
+const patterns = {};
+const muted = {};
+TRACKS.forEach(t => {
+  patterns[t.id] = DEMO[t.id].map(v => !!v);
+  muted[t.id] = false;
+});
+
+let audioCtx = null;
+let buffers = {};
+let masterGain = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.85;
+  masterGain.connect(audioCtx.destination);
+  buffers.kick  = renderBuffer(0.35, kickFill);
+  buffers.snare = renderBuffer(0.2,  snareFill);
+  buffers.hat   = renderBuffer(0.08, hatFill);
+  buffers.ride  = renderBuffer(0.6,  rideFill);
+  buffers.bass  = renderBuffer(0.3,  bassFill);
+  buffers.lead  = renderBuffer(0.25, leadFill);
+}
+
+// --- placeholder sample generators ---
+// These stand in for captured field recordings. They only produce a raw
+// buffer; all shaping (filter/pitch/envelope) happens live at playback time,
+// exactly as it will for real captured clips later.
+function renderBuffer(durationSec, fillFn) {
+  const sr = audioCtx.sampleRate;
+  const len = Math.floor(sr * durationSec);
+  const buf = audioCtx.createBuffer(1, len, sr);
+  fillFn(buf.getChannelData(0), sr, len);
+  return buf;
+}
+function kickFill(d, sr, len) {
+  let phase = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const freq = 55 + 120 * Math.exp(-t * 18);
+    phase += 2 * Math.PI * freq / sr;
+    const amp = Math.exp(-t * 9);
+    d[i] = Math.sin(phase) * amp;
+  }
+}
+function snareFill(d, sr, len) {
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const noise = (Math.random() * 2 - 1);
+    const tone = Math.sin(2 * Math.PI * 180 * t) * 0.3;
+    d[i] = (noise * 0.8 + tone) * Math.exp(-t * 14);
+  }
+}
+function hatFill(d, sr, len) {
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    d[i] = (Math.random() * 2 - 1) * Math.exp(-t * 40);
+  }
+}
+function rideFill(d, sr, len) {
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    d[i] = (Math.random() * 2 - 1) * Math.exp(-t * 3) * 0.7;
+  }
+}
+function bassFill(d, sr, len) {
+  let phase = 0;
+  const freq = 55;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    phase += 2 * Math.PI * freq / sr;
+    d[i] = Math.sin(phase) * Math.exp(-t * 6);
+  }
+}
+function leadFill(d, sr, len) {
+  let phase = 0, phase2 = 0;
+  const freq = 220;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    phase += 2 * Math.PI * freq / sr;
+    phase2 += 2 * Math.PI * freq * 2 / sr;
+    d[i] = (Math.sin(phase) * 0.7 + Math.sin(phase2) * 0.3) * Math.exp(-t * 8);
+  }
+}
+
+// --- playback chain (shared by placeholders and, later, real captures) ---
+function playStep(trackId, time) {
+  const track = TRACKS.find(t => t.id === trackId);
+  const buf = buffers[trackId];
+  if (!buf) return;
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = track.filterType;
+  filter.frequency.value = track.freq;
+  filter.Q.value = track.q;
+
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(0, time);
+  env.gain.linearRampToValueAtTime(1, time + 0.004);
+
+  src.connect(filter);
+  filter.connect(env);
+  env.connect(masterGain);
+
+  src.start(time);
+}
+
+// --- scheduler (lookahead pattern for tight timing) ---
+let tempo = 112;
+let isPlaying = false;
+let currentStep = 0;
+let nextStepTime = 0;
+let timerID = null;
+const lookaheadMs = 25;
+const scheduleAheadSec = 0.1;
+let scheduledNotes = [];
+
+function secondsPerStep() { return 60.0 / tempo / 4; }
+
+function scheduleStep(step, time) {
+  TRACKS.forEach(t => {
+    if (!muted[t.id] && patterns[t.id][step]) playStep(t.id, time);
+  });
+  scheduledNotes.push({ step, time });
+}
+
+function advanceStep() {
+  nextStepTime += secondsPerStep();
+  currentStep = (currentStep + 1) % 16;
+}
+
+function scheduler() {
+  while (nextStepTime < audioCtx.currentTime + scheduleAheadSec) {
+    scheduleStep(currentStep, nextStepTime);
+    advanceStep();
+  }
+  timerID = setTimeout(scheduler, lookaheadMs);
+}
+
+function play() {
+  initAudio();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  isPlaying = true;
+  currentStep = 0;
+  nextStepTime = audioCtx.currentTime + 0.05;
+  scheduledNotes = [];
+  scheduler();
+  requestAnimationFrame(drawLoop);
+  document.getElementById('playBtn').classList.add('playing');
+}
+
+function stop() {
+  isPlaying = false;
+  clearTimeout(timerID);
+  document.getElementById('playBtn').classList.remove('playing');
+  document.querySelectorAll('.step.playhead').forEach(el => el.classList.remove('playhead'));
+}
+
+let displayStep = -1;
+function drawLoop() {
+  if (!isPlaying) return;
+  const now = audioCtx.currentTime;
+  let latest = null;
+  scheduledNotes = scheduledNotes.filter(n => {
+    if (n.time <= now) { latest = n; return false; }
+    return true;
+  });
+  if (latest && latest.step !== displayStep) {
+    displayStep = latest.step;
+    document.querySelectorAll('.step.playhead').forEach(el => el.classList.remove('playhead'));
+    document.querySelectorAll(`.step[data-step="${displayStep}"]`).forEach(el => el.classList.add('playhead'));
+  }
+  requestAnimationFrame(drawLoop);
+}
+
+// --- UI build ---
+const tracksEl = document.getElementById('tracks');
+TRACKS.forEach(track => {
+  const row = document.createElement('div');
+  row.className = 'track' + (track.type === 'mel' ? ' melodic' : '');
+  row.dataset.track = track.id;
+
+  const header = document.createElement('div');
+  header.className = 'track-header';
+  const label = document.createElement('div');
+  label.className = 'track-label';
+  label.innerHTML = `<span class="dot"></span>${track.name}`;
+  label.addEventListener('click', () => {
+    muted[track.id] = !muted[track.id];
+    row.classList.toggle('muted', muted[track.id]);
+  });
+  header.appendChild(label);
+  row.appendChild(header);
+
+  const gridRow = document.createElement('div');
+  gridRow.className = 'grid-row';
+  for (let q = 0; q < 4; q++) {
+    const quad = document.createElement('div');
+    quad.className = 'quad';
+    for (let i = 0; i < 4; i++) {
+      const stepIndex = q * 4 + i;
+      const stepEl = document.createElement('div');
+      stepEl.className = 'step' + (patterns[track.id][stepIndex] ? ' on' : '');
+      stepEl.dataset.step = stepIndex;
+      stepEl.addEventListener('click', () => {
+        patterns[track.id][stepIndex] = !patterns[track.id][stepIndex];
+        stepEl.classList.toggle('on', patterns[track.id][stepIndex]);
+      });
+      quad.appendChild(stepEl);
+    }
+    gridRow.appendChild(quad);
+  }
+  row.appendChild(gridRow);
+  tracksEl.appendChild(row);
+});
+
+document.getElementById('playBtn').addEventListener('click', () => {
+  if (isPlaying) stop(); else play();
+});
+
+const tempoSlider = document.getElementById('tempoSlider');
+const tempoValue = document.getElementById('tempoValue');
+tempoSlider.addEventListener('input', () => {
+  tempo = parseInt(tempoSlider.value, 10);
+  tempoValue.textContent = tempo + ' bpm';
+});
+
+// --- Phase 2: mic input + live band energy analysis ---
+// This does not feed the sequencer yet — it's purely to prove the
+// listening pipeline works before wiring it into step matching.
+let micStream = null;
+let micSource = null;
+let analyser = null;
+let micActive = false;
+let meterRafId = null;
+let freqData = null;
+let bandBins = null;
+
+const micBtn = document.getElementById('micBtn');
+const micStatus = document.getElementById('micStatus');
+
+function setMicStatus(text, cls) {
+  micStatus.textContent = text;
+  micStatus.className = 'mic-status' + (cls ? ' ' + cls : '');
+}
+
+async function startMic() {
+  initAudio();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+  } catch (err) {
+    setMicStatus('Mic access denied', 'denied');
+    return;
+  }
+
+  micSource = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.6;
+  micSource.connect(analyser);
+
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  const nyquist = audioCtx.sampleRate / 2;
+  const binHz = nyquist / analyser.frequencyBinCount;
+  bandBins = {
+    lowEnd: Math.max(1, Math.floor(250 / binHz)),
+    midEnd: Math.floor(2000 / binHz),
+    highEnd: Math.min(analyser.frequencyBinCount - 1, Math.floor(8000 / binHz)),
+  };
+
+  micActive = true;
+  micBtn.textContent = 'Stop listening';
+  micBtn.classList.add('active');
+  setMicStatus('Listening…', 'live');
+  meterLoop();
+}
+
+function stopMic() {
+  micActive = false;
+  cancelAnimationFrame(meterRafId);
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  micBtn.textContent = 'Start listening';
+  micBtn.classList.remove('active');
+  setMicStatus('Not listening');
+  setBar('low', 0); setBar('mid', 0); setBar('high', 0);
+}
+
+function avgRange(arr, start, end) {
+  if (end <= start) return 0;
+  let sum = 0;
+  for (let i = start; i < end; i++) sum += arr[i];
+  return (sum / (end - start)) / 255;
+}
+
+function setBar(name, value) {
+  const pct = Math.round(Math.min(1, value) * 100);
+  document.getElementById('meter-' + name).style.height = pct + '%';
+  document.getElementById('meter-' + name + '-val').textContent = pct + '%';
+}
+
+function meterLoop() {
+  if (!micActive) return;
+  analyser.getByteFrequencyData(freqData);
+  setBar('low', avgRange(freqData, 0, bandBins.lowEnd));
+  setBar('mid', avgRange(freqData, bandBins.lowEnd, bandBins.midEnd));
+  setBar('high', avgRange(freqData, bandBins.midEnd, bandBins.highEnd));
+  meterRafId = requestAnimationFrame(meterLoop);
+}
+
+micBtn.addEventListener('click', () => {
+  if (micActive) stopMic(); else startMic();
+});
+</script>
+</body>
+</html>
