@@ -147,7 +147,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v2.0</span>
+    <span class="version">v2.0.1</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -448,6 +448,26 @@ function scheduler() {
   timerID = setTimeout(scheduler, lookaheadMs);
 }
 
+// Keeps the screen awake while actively playing, so it doesn't dim/lock
+// mid-performance. Not supported everywhere, so it fails silently.
+let wakeLock = null;
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (err) {
+    wakeLock = null;
+  }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (isPlaying && document.visibilityState === 'visible' && !wakeLock) {
+    requestWakeLock();
+  }
+});
+
 function play() {
   initAudio();
   if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -458,12 +478,14 @@ function play() {
   scheduler();
   requestAnimationFrame(drawLoop);
   document.getElementById('playBtn').classList.add('playing');
+  requestWakeLock();
 }
 
 function stop() {
   isPlaying = false;
   clearTimeout(timerID);
   document.getElementById('playBtn').classList.remove('playing');
+  releaseWakeLock();
 }
 
 let displayStep = -1;
