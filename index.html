@@ -87,27 +87,12 @@
   .radial-wrap{
     position:relative; width:100%; max-width:480px; margin:0 auto;
   }
-  .radial-wrap svg{ display:block; width:100%; height:auto; }
+  .radial-wrap svg{ display:block; width:100%; height:auto; touch-action:none; }
   .radial-step{ transition:fill 80ms linear, stroke 80ms linear; }
-  .dial{
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-    width:24%; aspect-ratio:1; border-radius:50%;
-    background:var(--panel-2); border:1px solid var(--amber-dim);
-    touch-action:none; display:flex; align-items:center; justify-content:center;
-    cursor:grab;
+  .hub-label{
+    font-family:var(--mono); font-size:15px; letter-spacing:0.06em;
+    fill:var(--text); text-transform:uppercase; pointer-events:none;
   }
-  .dial.muted-dial{ border-color:#5A5548; }
-  .dial-rotor{ position:absolute; inset:0; transform-origin:50% 50%; transition:transform 150ms ease-out; }
-  .dial-rotor::after{
-    content:''; position:absolute; top:8%; left:50%; width:3px; height:20%;
-    background:var(--amber); transform:translateX(-50%); border-radius:2px;
-  }
-  .dial.muted-dial .dial-rotor::after{ background:#5A5548; }
-  .dial-label{
-    font-family:var(--mono); font-size:9px; letter-spacing:0.06em;
-    color:var(--text); text-transform:uppercase; pointer-events:none; z-index:1;
-  }
-  .dial.muted-dial .dial-label{ color:#5A5548; text-decoration:line-through; }
   .radial-hint{
     text-align:center; font-size:10px; color:var(--text-dim); margin-top:10px;
   }
@@ -147,7 +132,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v2.0</span>
+    <span class="version">v2.1</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -171,12 +156,8 @@
 
   <div class="radial-wrap">
     <svg id="radialSvg" viewBox="0 0 520 520"></svg>
-    <div class="dial" id="tuningDial">
-      <div class="dial-rotor" id="dialRotor"></div>
-      <div class="dial-label" id="dialLabel">Kick</div>
-    </div>
   </div>
-  <p class="radial-hint">Drag the center dial to focus a ring for editing. Tap the dial to mute the focused track.</p>
+  <p class="radial-hint">Drag the vertical dial above 12 o'clock to focus a ring for editing. Tap it to mute the focused track.</p>
 
   <div class="env-panel">
     <div class="env-header">
@@ -511,7 +492,7 @@ const COLOR_MUTED_STROKE = '#5A5548';
 const BAND_COLORS = { low: COLOR_LOW, mid: COLOR_MID, high: COLOR_HIGH };
 
 const CX = 260, CY = 260, HUB_R = 80, RING_GAP = 4, BASE_TH = 16, ACTIVE_TH = 32;
-const STEP_GAP = 1.5, GROUP_GAP = 6;
+const STEP_GAP = 1.5, GROUP_GAP = 24;
 
 function polar(cx, cy, r, angleDeg) {
   const rad = (angleDeg - 90) * Math.PI / 180;
@@ -524,16 +505,20 @@ function arcPath(cx, cy, rInner, rOuter, startAngle, endAngle) {
   return `M ${p1.x} ${p1.y} A ${rOuter} ${rOuter} 0 ${large} 0 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${rInner} ${rInner} 0 ${large} 1 ${p4.x} ${p4.y} Z`;
 }
 function computeStepAngles() {
+  // Group gaps land exactly on the group boundaries; shifting everything
+  // by half a gap centers those boundaries precisely on 12/3/6/9.
   const stepWidth = (360 - GROUP_GAP * 4 - STEP_GAP * 12) / 16;
+  const offset = GROUP_GAP / 2;
   const angles = []; let a = 0;
   for (let i = 0; i < 16; i++) {
     const start = a, end = a + stepWidth;
-    angles.push({ start, end, center: (start + end) / 2 });
+    angles.push({ start: start + offset, end: end + offset, center: (start + end) / 2 + offset });
     a = end + ((i % 4 === 3) ? GROUP_GAP : STEP_GAP);
   }
   return angles;
 }
 const ANGLES = computeStepAngles();
+const SPOKE_ANGLES = [0, 90, 180, 270]; // 12, 3, 6, 9 — reserved channels for dials
 
 let activeIndex = 0;
 const svgNS = 'http://www.w3.org/2000/svg';
@@ -568,9 +553,53 @@ function updateStepVisual(trackId, stepIdx) {
   path.setAttribute('stroke', stroke);
 }
 
+// Persistent elements: created once, only their attributes are updated on
+// re-render. This matters because the dial thumb can be mid-drag (with
+// pointer capture) exactly when a re-render is triggered — recreating it
+// would drop the drag.
+const hubCircle = document.createElementNS(svgNS, 'circle');
+hubCircle.setAttribute('cx', CX); hubCircle.setAttribute('cy', CY); hubCircle.setAttribute('r', HUB_R);
+hubCircle.setAttribute('fill', '#2A251C');
+hubCircle.setAttribute('stroke-width', '2');
+radialSvg.appendChild(hubCircle);
+
+const hubLabel = document.createElementNS(svgNS, 'text');
+hubLabel.setAttribute('x', CX); hubLabel.setAttribute('y', CY);
+hubLabel.setAttribute('text-anchor', 'middle');
+hubLabel.setAttribute('dominant-baseline', 'central');
+hubLabel.setAttribute('class', 'hub-label');
+radialSvg.appendChild(hubLabel);
+
+const ringsGroup = document.createElementNS(svgNS, 'g');
+ringsGroup.id = 'ringsGroup';
+radialSvg.appendChild(ringsGroup);
+
+const dialTrack = document.createElementNS(svgNS, 'line');
+dialTrack.setAttribute('stroke', COLOR_LINE);
+dialTrack.setAttribute('stroke-width', '3');
+dialTrack.setAttribute('stroke-linecap', 'round');
+radialSvg.appendChild(dialTrack);
+
+const dialThumb = document.createElementNS(svgNS, 'circle');
+dialThumb.setAttribute('r', '13');
+dialThumb.setAttribute('cx', CX);
+dialThumb.style.cursor = 'grab';
+radialSvg.appendChild(dialThumb);
+
+let trackTopY = 0, trackBottomY = 0;
+
+function clientToSvgPoint(clientX, clientY) {
+  const pt = radialSvg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  const ctm = radialSvg.getScreenCTM();
+  return pt.matrixTransform(ctm.inverse());
+}
+
 function renderRadial() {
-  radialSvg.innerHTML = '';
+  ringsGroup.innerHTML = '';
   const radii = computeRingRadii();
+  const outerMost = radii[RING_ORDER[RING_ORDER.length - 1]].rOuter;
+
   RING_ORDER.forEach((id, ringIndex) => {
     const track = TRACKS.find(t => t.id === id);
     const { rInner, rOuter } = radii[id];
@@ -590,11 +619,26 @@ function renderRadial() {
         patterns[id][stepIdx] = !patterns[id][stepIdx];
         updateStepVisual(id, stepIdx);
       });
-      radialSvg.appendChild(path);
+      ringsGroup.appendChild(path);
     });
   });
 
-  const outerMost = radii[RING_ORDER[RING_ORDER.length - 1]].rOuter;
+  // Reserved spoke placeholders at 3, 6, 9 — same channel as the working
+  // dial at 12, just empty for now.
+  SPOKE_ANGLES.slice(1).forEach(angle => {
+    const p1 = polar(CX, CY, HUB_R + 8, angle);
+    const p2 = polar(CX, CY, outerMost - 8, angle);
+    const spoke = document.createElementNS(svgNS, 'line');
+    spoke.setAttribute('x1', p1.x); spoke.setAttribute('y1', p1.y);
+    spoke.setAttribute('x2', p2.x); spoke.setAttribute('y2', p2.y);
+    spoke.setAttribute('stroke', COLOR_LINE);
+    spoke.setAttribute('stroke-width', '2');
+    spoke.setAttribute('stroke-dasharray', '2,5');
+    spoke.setAttribute('stroke-linecap', 'round');
+    spoke.setAttribute('opacity', '0.6');
+    ringsGroup.appendChild(spoke);
+  });
+
   const line = document.createElementNS(svgNS, 'line');
   line.setAttribute('id', 'radialPlayhead');
   line.setAttribute('x1', CX); line.setAttribute('y1', CY - HUB_R);
@@ -604,58 +648,56 @@ function renderRadial() {
   line.setAttribute('stroke-linecap', 'round');
   line.style.transformOrigin = `${CX}px ${CY}px`;
   line.style.transform = `rotate(${ANGLES[displayStep >= 0 ? displayStep : 0].center}deg)`;
-  radialSvg.appendChild(line);
+  ringsGroup.appendChild(line);
+
+  // The 12 o'clock spoke holds the working tuning dial — a straight
+  // vertical track between the hub and the outer edge, "rotated 90deg"
+  // from a normal rotary knob so it reads as a slider, not a wheel.
+  trackBottomY = CY - HUB_R - 8;
+  trackTopY = CY - outerMost + 8;
+  dialTrack.setAttribute('x1', CX); dialTrack.setAttribute('y1', trackBottomY);
+  dialTrack.setAttribute('x2', CX); dialTrack.setAttribute('y2', trackTopY);
+
+  const thumbY = trackBottomY - activeIndex * ((trackBottomY - trackTopY) / 5);
+  dialThumb.setAttribute('cy', thumbY);
+  const activeTrack = TRACKS[activeIndex];
+  dialThumb.setAttribute('fill', muted[activeTrack.id] ? COLOR_MUTED_STROKE : '#E8A33D');
+
+  hubLabel.textContent = activeTrack.name;
+  hubCircle.setAttribute('stroke', muted[activeTrack.id] ? COLOR_MUTED_STROKE : BAND_COLORS[activeTrack.band]);
 }
 
-// --- Tuning dial: drag to focus a ring, tap to mute it ---
-const dialEl = document.getElementById('tuningDial');
-const dialRotor = document.getElementById('dialRotor');
-const dialLabel = document.getElementById('dialLabel');
+// --- Tuning dial: a linear slider in the 12 o'clock spoke. Drag to focus
+// a ring (bigger tap target); tap without dragging to mute it. The hub
+// only displays which ring is focused — it isn't interactive itself.
 let dialDragging = false, dialDownX = 0, dialDownY = 0, dialMoved = false;
 
-function dialAngleFromEvent(e) {
-  const rect = dialEl.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-  let deg = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI + 90;
-  if (deg < 0) deg += 360;
-  return deg;
-}
-
-function setActiveTrack(idx) {
-  activeIndex = idx;
-  dialLabel.textContent = TRACKS[idx].name;
-  dialEl.classList.toggle('muted-dial', muted[TRACKS[idx].id]);
-  renderRadial();
-}
-
-dialEl.addEventListener('pointerdown', (e) => {
+dialThumb.addEventListener('pointerdown', (e) => {
   dialDragging = true; dialMoved = false;
   dialDownX = e.clientX; dialDownY = e.clientY;
-  dialEl.setPointerCapture(e.pointerId);
-  dialRotor.style.transition = 'none';
+  dialThumb.setPointerCapture(e.pointerId);
 });
-dialEl.addEventListener('pointermove', (e) => {
+dialThumb.addEventListener('pointermove', (e) => {
   if (!dialDragging) return;
   if (Math.hypot(e.clientX - dialDownX, e.clientY - dialDownY) > 6) dialMoved = true;
-  const deg = dialAngleFromEvent(e);
-  dialRotor.style.transform = `rotate(${deg}deg)`;
-  const idx = Math.round(deg / 60) % 6;
-  if (idx !== activeIndex) setActiveTrack(idx);
+  const pt = clientToSvgPoint(e.clientX, e.clientY);
+  const y = Math.max(trackTopY, Math.min(trackBottomY, pt.y));
+  dialThumb.setAttribute('cy', y);
+  const span = (trackBottomY - trackTopY) / 5;
+  const idx = Math.max(0, Math.min(5, Math.round((trackBottomY - y) / span)));
+  if (idx !== activeIndex) { activeIndex = idx; renderRadial(); }
 });
 function endDialDrag() {
   if (!dialDragging) return;
   dialDragging = false;
-  dialRotor.style.transition = 'transform 150ms ease-out';
-  dialRotor.style.transform = `rotate(${activeIndex * 60}deg)`;
   if (!dialMoved) {
     const id = TRACKS[activeIndex].id;
     muted[id] = !muted[id];
-    dialEl.classList.toggle('muted-dial', muted[id]);
-    renderRadial();
   }
+  renderRadial();
 }
-dialEl.addEventListener('pointerup', endDialDrag);
-dialEl.addEventListener('pointercancel', endDialDrag);
+dialThumb.addEventListener('pointerup', endDialDrag);
+dialThumb.addEventListener('pointercancel', endDialDrag);
 
 renderRadial();
 
