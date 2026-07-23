@@ -84,38 +84,17 @@
     -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
     background:var(--amber); cursor:pointer; border:2px solid var(--bg);
   }
-  .tracks{ display:flex; flex-direction:column; gap:7px; }
-  .track{
-    background:var(--panel); border:1px solid var(--line); border-radius:10px;
-    padding:6px 8px; display:flex; flex-direction:column; gap:4px;
+  .radial-wrap{
+    position:relative; width:100%; max-width:480px; margin:0 auto;
   }
-  .track-header{ display:flex; align-items:center; }
-  .track-label{
-    flex-shrink:0; font-size:10px; letter-spacing:0.06em;
-    text-transform:uppercase; color:var(--text-dim); cursor:pointer;
-    line-height:1.3; padding:2px 0;
+  .radial-wrap svg{ display:block; width:100%; height:auto; touch-action:none; }
+  .radial-step{ transition:fill 80ms linear, stroke 80ms linear; }
+  .hub-label{
+    font-family:var(--mono); font-size:15px; letter-spacing:0.06em;
+    fill:var(--text); text-transform:uppercase; pointer-events:none;
   }
-  .track-label .dot{
-    display:inline-block; width:5px; height:5px; border-radius:50%;
-    background:var(--teal); margin-right:4px; vertical-align:middle;
-  }
-  .track.muted .track-label{ color:#5A5548; text-decoration:line-through; }
-  .track.muted .track-label .dot{ background:#5A5548; }
-  .track.melodic .track-label .dot{ background:var(--amber); }
-  .grid-row{ display:flex; gap:6px; flex:1; width:100%; }
-  .quad{ display:grid; grid-template-columns:repeat(4,1fr); gap:2px; flex:1; }
-  .step{
-    aspect-ratio:1; min-height:15px; border-radius:3px;
-    background:var(--panel-2); border:1px solid var(--line);
-    cursor:pointer;
-  }
-  .step.on{ background:var(--amber-dim); border-color:var(--amber); }
-  .step.playhead{ box-shadow:0 0 0 1px var(--amber) inset; }
-  .step.on.playhead{ background:var(--amber); }
-  .track.muted .step.on{ background:#4A4030; border-color:#5A5548; }
-  .step.matched{
-    background:var(--teal) !important; border-color:var(--teal) !important;
-    box-shadow:0 0 6px var(--teal);
+  .radial-hint{
+    text-align:center; font-size:10px; color:var(--text-dim); margin-top:10px;
   }
   .footer-note{
     margin-top:20px; font-size:10px; color:var(--text-dim); line-height:1.6;
@@ -153,7 +132,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v1.4</span>
+    <span class="version">v2.1.1</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -175,7 +154,10 @@
     </div>
   </div>
 
-  <div class="tracks" id="tracks"></div>
+  <div class="radial-wrap">
+    <svg id="radialSvg" viewBox="0 0 520 520"></svg>
+  </div>
+  <p class="radial-hint">Drag the vertical dial above 12 o'clock to focus a ring for editing. Tap it to mute the focused track.</p>
 
   <div class="env-panel">
     <div class="env-header">
@@ -216,7 +198,7 @@
     </div>
   </div>
 
-  <p class="footer-note">Tap a track name to mute it. Tap steps to build a pattern — grouped in 4s, like LSDJ / Koala Sampler.</p>
+  <p class="footer-note">Each ring is one voice, grouped in 4s around the circle. Kick → Hat → Ride → Snare → Bass → Lead, inner to outer.</p>
 </div>
 
 <script>
@@ -447,6 +429,26 @@ function scheduler() {
   timerID = setTimeout(scheduler, lookaheadMs);
 }
 
+// Keeps the screen awake while actively playing, so it doesn't dim/lock
+// mid-performance. Not supported everywhere, so it fails silently.
+let wakeLock = null;
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (err) {
+    wakeLock = null;
+  }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (isPlaying && document.visibilityState === 'visible' && !wakeLock) {
+    requestWakeLock();
+  }
+});
+
 function play() {
   initAudio();
   if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -457,13 +459,14 @@ function play() {
   scheduler();
   requestAnimationFrame(drawLoop);
   document.getElementById('playBtn').classList.add('playing');
+  requestWakeLock();
 }
 
 function stop() {
   isPlaying = false;
   clearTimeout(timerID);
   document.getElementById('playBtn').classList.remove('playing');
-  document.querySelectorAll('.step.playhead').forEach(el => el.classList.remove('playhead'));
+  releaseWakeLock();
 }
 
 let displayStep = -1;
@@ -477,8 +480,8 @@ function drawLoop() {
   });
   if (latest && latest.step !== displayStep) {
     displayStep = latest.step;
-    document.querySelectorAll('.step.playhead').forEach(el => el.classList.remove('playhead'));
-    document.querySelectorAll(`.step[data-step="${displayStep}"]`).forEach(el => el.classList.add('playhead'));
+    const line = document.getElementById('radialPlayhead');
+    if (line) line.style.transform = `rotate(${ANGLES[displayStep].center}deg)`;
   }
   matchEvents = matchEvents.filter(ev => {
     if (ev.time <= now) { flashMatch(ev.trackId, ev.step); return false; }
@@ -488,65 +491,236 @@ function drawLoop() {
 }
 
 function flashMatch(trackId, step) {
-  const el = document.querySelector(`.track[data-track="${trackId}"] .step[data-step="${step}"]`);
-  if (!el) return;
-  el.classList.add('matched');
-  setTimeout(() => el.classList.remove('matched'), 220);
+  const path = radialSvg.querySelector(`path[data-track="${trackId}"][data-step="${step}"]`);
+  if (!path) return;
+  path.setAttribute('fill', COLOR_TEAL);
+  path.setAttribute('fill-opacity', '0.75');
+  path.setAttribute('stroke', COLOR_TEAL);
+  setTimeout(() => updateStepVisual(trackId, step), 220);
 }
 
-// --- UI build ---
-const tracksEl = document.getElementById('tracks');
-TRACKS.forEach(track => {
-  const row = document.createElement('div');
-  row.className = 'track' + (track.type === 'mel' ? ' melodic' : '');
-  row.dataset.track = track.id;
+// --- Radial sequencer ---
+// Six concentric rings (Kick -> Hat -> Ride -> Snare -> Bass -> Lead,
+// inner to outer), 16 arc-steps each grouped in 4s. A center dial focuses
+// one ring at a time (bigger tap target) and doubles as a mute toggle.
+const RING_ORDER = TRACKS.map(t => t.id);
+const COLOR_LOW  = '#4C7EDB';
+const COLOR_MID  = '#5FA88C';
+const COLOR_HIGH = '#D06A5C';
+const COLOR_TEAL = '#4F8A82';
+const COLOR_LINE = '#3A3327';
+const COLOR_MUTED_FILL = '#4A4030';
+const COLOR_MUTED_STROKE = '#5A5548';
+const BAND_COLORS = { low: COLOR_LOW, mid: COLOR_MID, high: COLOR_HIGH };
 
-  const header = document.createElement('div');
-  header.className = 'track-header';
-  const label = document.createElement('div');
-  label.className = 'track-label';
-  label.innerHTML = `<span class="dot"></span>${track.name}`;
-  label.addEventListener('click', () => {
-    muted[track.id] = !muted[track.id];
-    row.classList.toggle('muted', muted[track.id]);
-  });
-  header.appendChild(label);
-  row.appendChild(header);
+const CX = 260, CY = 260, HUB_R = 80, RING_GAP = 4, BASE_TH = 16, ACTIVE_TH = 32;
+const STEP_GAP = 1.5, GROUP_GAP = 24;
 
-  const gridRow = document.createElement('div');
-  gridRow.className = 'grid-row';
-  for (let q = 0; q < 4; q++) {
-    const quad = document.createElement('div');
-    quad.className = 'quad';
-    for (let i = 0; i < 4; i++) {
-      const stepIndex = q * 4 + i;
-      const stepEl = document.createElement('div');
-      stepEl.className = 'step' + (patterns[track.id][stepIndex] ? ' on' : '');
-      stepEl.dataset.step = stepIndex;
-      stepEl.addEventListener('click', () => {
-        patterns[track.id][stepIndex] = !patterns[track.id][stepIndex];
-        stepEl.classList.toggle('on', patterns[track.id][stepIndex]);
-      });
-      quad.appendChild(stepEl);
-    }
-    gridRow.appendChild(quad);
+function polar(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function arcPath(cx, cy, rInner, rOuter, startAngle, endAngle) {
+  const p1 = polar(cx, cy, rOuter, endAngle), p2 = polar(cx, cy, rOuter, startAngle);
+  const p3 = polar(cx, cy, rInner, startAngle), p4 = polar(cx, cy, rInner, endAngle);
+  const large = (endAngle - startAngle) <= 180 ? 0 : 1;
+  return `M ${p1.x} ${p1.y} A ${rOuter} ${rOuter} 0 ${large} 0 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${rInner} ${rInner} 0 ${large} 1 ${p4.x} ${p4.y} Z`;
+}
+function computeStepAngles() {
+  // Group gaps land at the group boundaries; shifting everything by half
+  // a gap centers those boundaries exactly on 12/3/6/9.
+  const stepWidth = (360 - GROUP_GAP * 4 - STEP_GAP * 12) / 16;
+  const offset = GROUP_GAP / 2;
+  const angles = []; let a = 0;
+  for (let i = 0; i < 16; i++) {
+    const start = a, end = a + stepWidth;
+    angles.push({ start: start + offset, end: end + offset, center: (start + end) / 2 + offset });
+    a = end + ((i % 4 === 3) ? GROUP_GAP : STEP_GAP);
   }
-  row.appendChild(gridRow);
-  tracksEl.appendChild(row);
+  return angles;
+}
+const ANGLES = computeStepAngles();
+const SPOKE_ANGLES = [0, 90, 180, 270];
+
+let activeIndex = 0;
+const svgNS = 'http://www.w3.org/2000/svg';
+const radialSvg = document.getElementById('radialSvg');
+
+const hubCircle = document.createElementNS(svgNS, 'circle');
+hubCircle.setAttribute('cx', CX); hubCircle.setAttribute('cy', CY); hubCircle.setAttribute('r', HUB_R);
+hubCircle.setAttribute('fill', '#2A251C');
+hubCircle.setAttribute('stroke-width', '2');
+radialSvg.appendChild(hubCircle);
+
+const hubLabel = document.createElementNS(svgNS, 'text');
+hubLabel.setAttribute('x', CX); hubLabel.setAttribute('y', CY);
+hubLabel.setAttribute('text-anchor', 'middle');
+hubLabel.setAttribute('dominant-baseline', 'central');
+hubLabel.setAttribute('class', 'hub-label');
+radialSvg.appendChild(hubLabel);
+
+const ringsGroup = document.createElementNS(svgNS, 'g');
+radialSvg.appendChild(ringsGroup);
+
+const dialTrack = document.createElementNS(svgNS, 'line');
+dialTrack.setAttribute('x1', CX); dialTrack.setAttribute('x2', CX);
+dialTrack.setAttribute('stroke', COLOR_LINE);
+dialTrack.setAttribute('stroke-width', '3');
+dialTrack.setAttribute('stroke-linecap', 'round');
+radialSvg.appendChild(dialTrack);
+
+const dialThumb = document.createElementNS(svgNS, 'circle');
+dialThumb.setAttribute('r', '13');
+dialThumb.setAttribute('cx', CX);
+dialThumb.style.cursor = 'grab';
+radialSvg.appendChild(dialThumb);
+
+let trackTopY = 0, trackBottomY = 0;
+
+function computeRingRadii() {
+  let r = HUB_R + RING_GAP;
+  const radii = {};
+  RING_ORDER.forEach((id, i) => {
+    const th = (i === activeIndex) ? ACTIVE_TH : BASE_TH;
+    radii[id] = { rInner: r, rOuter: r + th };
+    r = r + th + RING_GAP;
+  });
+  return radii;
+}
+
+function stepFillStroke(track, on) {
+  const isMuted = muted[track.id];
+  if (!on) return { fill: 'none', fillOpacity: '1', stroke: COLOR_LINE };
+  if (isMuted) return { fill: COLOR_MUTED_FILL, fillOpacity: '1', stroke: COLOR_MUTED_STROKE };
+  return { fill: BAND_COLORS[track.band], fillOpacity: '0.55', stroke: BAND_COLORS[track.band] };
+}
+
+function updateStepVisual(trackId, stepIdx) {
+  const path = radialSvg.querySelector(`path[data-track="${trackId}"][data-step="${stepIdx}"]`);
+  if (!path) return;
+  const track = TRACKS.find(t => t.id === trackId);
+  const on = patterns[trackId][stepIdx];
+  const { fill, fillOpacity, stroke } = stepFillStroke(track, on);
+  path.setAttribute('fill', fill);
+  path.setAttribute('fill-opacity', fillOpacity);
+  path.setAttribute('stroke', stroke);
+}
+
+function renderRadial() {
+  ringsGroup.innerHTML = '';
+  const radii = computeRingRadii();
+  const outerMost = radii[RING_ORDER[RING_ORDER.length - 1]].rOuter;
+
+  RING_ORDER.forEach((id, ringIndex) => {
+    const track = TRACKS.find(t => t.id === id);
+    const { rInner, rOuter } = radii[id];
+    ANGLES.forEach((ang, stepIdx) => {
+      const on = patterns[id][stepIdx];
+      const { fill, fillOpacity, stroke } = stepFillStroke(track, on);
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('d', arcPath(CX, CY, rInner, rOuter, ang.start, ang.end));
+      path.setAttribute('fill', fill);
+      path.setAttribute('fill-opacity', fillOpacity);
+      path.setAttribute('stroke', stroke);
+      path.setAttribute('stroke-width', ringIndex === activeIndex ? '1.5' : '1');
+      path.setAttribute('class', 'radial-step');
+      path.dataset.track = id;
+      path.dataset.step = stepIdx;
+      path.addEventListener('click', () => {
+        patterns[id][stepIdx] = !patterns[id][stepIdx];
+        updateStepVisual(id, stepIdx);
+      });
+      ringsGroup.appendChild(path);
+    });
+  });
+
+  // Reserved spokes at 3, 6, 9 — same channel as the working dial at 12,
+  // left empty for now.
+  SPOKE_ANGLES.slice(1).forEach(angle => {
+    const p1 = polar(CX, CY, HUB_R + 8, angle);
+    const p2 = polar(CX, CY, outerMost - 8, angle);
+    const spoke = document.createElementNS(svgNS, 'line');
+    spoke.setAttribute('x1', p1.x); spoke.setAttribute('y1', p1.y);
+    spoke.setAttribute('x2', p2.x); spoke.setAttribute('y2', p2.y);
+    spoke.setAttribute('stroke', COLOR_LINE);
+    spoke.setAttribute('stroke-width', '2');
+    spoke.setAttribute('stroke-dasharray', '2,5');
+    spoke.setAttribute('opacity', '0.6');
+    ringsGroup.appendChild(spoke);
+  });
+
+  const line = document.createElementNS(svgNS, 'line');
+  line.setAttribute('id', 'radialPlayhead');
+  line.setAttribute('x1', CX); line.setAttribute('y1', CY - HUB_R);
+  line.setAttribute('x2', CX); line.setAttribute('y2', CY - outerMost);
+  line.setAttribute('stroke', '#E8A33D');
+  line.setAttribute('stroke-width', '2');
+  line.setAttribute('stroke-linecap', 'round');
+  line.style.transformOrigin = `${CX}px ${CY}px`;
+  line.style.transform = `rotate(${ANGLES[displayStep >= 0 ? displayStep : 0].center}deg)`;
+  ringsGroup.appendChild(line);
+
+  // 12 o'clock spoke holds the working dial: a straight vertical track
+  // between the hub and the outer edge.
+  trackBottomY = CY - HUB_R - 8;
+  trackTopY = CY - outerMost + 8;
+  dialTrack.setAttribute('y1', trackBottomY);
+  dialTrack.setAttribute('y2', trackTopY);
+
+  const thumbY = trackBottomY - activeIndex * ((trackBottomY - trackTopY) / 5);
+  dialThumb.setAttribute('cy', thumbY);
+  const activeTrack = TRACKS[activeIndex];
+  dialThumb.setAttribute('fill', muted[activeTrack.id] ? COLOR_MUTED_STROKE : '#E8A33D');
+
+  hubLabel.textContent = activeTrack.name;
+  hubCircle.setAttribute('stroke', muted[activeTrack.id] ? COLOR_MUTED_STROKE : BAND_COLORS[activeTrack.band]);
+}
+
+// --- Tuning dial: a linear slider in the 12 o'clock spoke. Drag to focus
+// a ring (bigger tap target); tap without dragging to mute it.
+let dialDragging = false, dialDownX = 0, dialDownY = 0, dialMoved = false;
+
+function svgYFromClientY(clientY) {
+  const rect = radialSvg.getBoundingClientRect();
+  const scale = rect.height / 520; // viewBox is 520 units tall
+  return (clientY - rect.top) / scale;
+}
+
+dialThumb.addEventListener('pointerdown', (e) => {
+  dialDragging = true; dialMoved = false;
+  dialDownX = e.clientX; dialDownY = e.clientY;
+  document.addEventListener('pointermove', onDialMove);
+  document.addEventListener('pointerup', endDialDrag);
+  document.addEventListener('pointercancel', endDialDrag);
+  e.preventDefault();
 });
+function onDialMove(e) {
+  if (!dialDragging) return;
+  if (Math.hypot(e.clientX - dialDownX, e.clientY - dialDownY) > 6) dialMoved = true;
+  const y = Math.max(trackTopY, Math.min(trackBottomY, svgYFromClientY(e.clientY)));
+  dialThumb.setAttribute('cy', y);
+  const span = (trackBottomY - trackTopY) / 5;
+  const idx = Math.max(0, Math.min(5, Math.round((trackBottomY - y) / span)));
+  if (idx !== activeIndex) { activeIndex = idx; renderRadial(); }
+}
+function endDialDrag() {
+  if (!dialDragging) return;
+  dialDragging = false;
+  document.removeEventListener('pointermove', onDialMove);
+  document.removeEventListener('pointerup', endDialDrag);
+  document.removeEventListener('pointercancel', endDialDrag);
+  if (!dialMoved) {
+    const id = TRACKS[activeIndex].id;
+    muted[id] = !muted[id];
+  }
+  renderRadial();
+}
+
+renderRadial();
 
 document.getElementById('playBtn').addEventListener('click', () => {
   if (isPlaying) stop(); else play();
 });
-
-function syncGridToActiveBank() {
-  TRACKS.forEach(t => {
-    for (let i = 0; i < 16; i++) {
-      const el = document.querySelector(`.track[data-track="${t.id}"] .step[data-step="${i}"]`);
-      if (el) el.classList.toggle('on', patterns[t.id][i]);
-    }
-  });
-}
 
 document.querySelectorAll('.beat-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -554,7 +728,7 @@ document.querySelectorAll('.beat-btn').forEach(btn => {
     patterns = patternBanks[activeBank];
     document.querySelectorAll('.beat-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    syncGridToActiveBank();
+    renderRadial();
   });
 });
 
