@@ -132,7 +132,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v2.1.1</span>
+    <span class="version">v2.1.2</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -624,6 +624,7 @@ function renderRadial() {
       path.setAttribute('stroke', stroke);
       path.setAttribute('stroke-width', ringIndex === activeIndex ? '1.5' : '1');
       path.setAttribute('class', 'radial-step');
+      path.setAttribute('pointer-events', 'all');
       path.dataset.track = id;
       path.dataset.step = stepIdx;
       path.addEventListener('click', () => {
