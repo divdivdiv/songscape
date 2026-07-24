@@ -132,7 +132,7 @@
 <div class="shell">
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v2.1.2</span>
+    <span class="version">v2.2</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -606,6 +606,29 @@ function updateStepVisual(trackId, stepIdx) {
   path.setAttribute('stroke', stroke);
 }
 
+// Press-and-drag paints: the first step tapped sets the target on/off
+// value, and every other step-arc the pointer passes over while still
+// down gets set to that same value.
+let painting = false, paintValue = false;
+function onPaintMove(e) {
+  if (!painting) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  if (!el || !el.classList || !el.classList.contains('radial-step')) return;
+  const trackId = el.dataset.track;
+  const stepIdx = parseInt(el.dataset.step, 10);
+  if (patterns[trackId][stepIdx] !== paintValue) {
+    patterns[trackId][stepIdx] = paintValue;
+    updateStepVisual(trackId, stepIdx);
+  }
+}
+function endPaint() {
+  if (!painting) return;
+  painting = false;
+  document.removeEventListener('pointermove', onPaintMove);
+  document.removeEventListener('pointerup', endPaint);
+  document.removeEventListener('pointercancel', endPaint);
+}
+
 function renderRadial() {
   ringsGroup.innerHTML = '';
   const radii = computeRingRadii();
@@ -627,9 +650,15 @@ function renderRadial() {
       path.setAttribute('pointer-events', 'all');
       path.dataset.track = id;
       path.dataset.step = stepIdx;
-      path.addEventListener('click', () => {
-        patterns[id][stepIdx] = !patterns[id][stepIdx];
+      path.addEventListener('pointerdown', (e) => {
+        painting = true;
+        paintValue = !patterns[id][stepIdx];
+        patterns[id][stepIdx] = paintValue;
         updateStepVisual(id, stepIdx);
+        document.addEventListener('pointermove', onPaintMove);
+        document.addEventListener('pointerup', endPaint);
+        document.addEventListener('pointercancel', endPaint);
+        e.preventDefault();
       });
       ringsGroup.appendChild(path);
     });
