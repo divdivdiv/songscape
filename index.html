@@ -27,6 +27,13 @@
   .shell{
     max-width:520px; margin:0 auto; padding:18px 10px 40px;
   }
+  .util-row{ display:flex; justify-content:space-between; margin-bottom:12px; }
+  .util-btn{
+    font-family:var(--mono); font-size:10px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--text-dim); background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; padding:7px 14px; cursor:pointer;
+  }
+  .util-btn:active{ background:var(--panel-2); color:var(--text); }
   .header{
     display:flex; align-items:flex-start; justify-content:space-between;
     margin-bottom:6px;
@@ -85,7 +92,7 @@
     background:var(--amber); cursor:pointer; border:2px solid var(--bg);
   }
   .radial-wrap{
-    position:relative; width:100%; max-width:480px; margin:0 auto;
+    position:relative; width:100%; margin:0 auto;
   }
   .radial-wrap svg{ display:block; width:100%; height:auto; touch-action:none; }
   .radial-step{ transition:fill 80ms linear, stroke 80ms linear; }
@@ -130,9 +137,13 @@
 </head>
 <body>
 <div class="shell">
+  <div class="util-row">
+    <button class="util-btn" id="clearBtn">Clear</button>
+    <button class="util-btn" id="randomBtn">Random</button>
+  </div>
   <div class="header">
     <h1>Field Sequencer</h1>
-    <span class="version">v2.3</span>
+    <span class="version">v2.4</span>
   </div>
   <p class="subtitle">Every sound here is a placeholder recording run through the same filter, pitch and envelope chain that field-captured environmental clips will use later.</p>
 
@@ -519,7 +530,8 @@ const COLOR_MUTED_FILL = '#4A4030';
 const COLOR_MUTED_STROKE = '#5A5548';
 const BAND_COLORS = { low: COLOR_LOW, mid: COLOR_MID, high: COLOR_HIGH };
 
-const CX = 260, CY = 260, HUB_R = 80, RING_GAP = 4, BASE_TH = 16;
+const CX = 260, CY = 260, HUB_R = 80, RING_GAP = 4;
+const RING_THICKNESS = [12, 16, 20, 24, 28, 34]; // inner to outer, increasing
 const STEP_GAP = 1.5, GROUP_GAP = 24;
 
 function polar(cx, cy, r, angleDeg) {
@@ -587,8 +599,9 @@ function computeRingRadii() {
   let r = HUB_R + RING_GAP;
   const radii = [];
   for (let i = 0; i < 6; i++) {
-    radii.push({ rInner: r, rOuter: r + BASE_TH });
-    r = r + BASE_TH + RING_GAP;
+    const th = RING_THICKNESS[i];
+    radii.push({ rInner: r, rOuter: r + th });
+    r = r + th + RING_GAP;
   }
   return radii;
 }
@@ -762,6 +775,19 @@ document.querySelectorAll('.beat-btn').forEach(btn => {
     btn.classList.add('active');
     renderRadial();
   });
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  TRACKS.forEach(t => patterns[t.id].fill(false));
+  renderRadial();
+});
+
+document.getElementById('randomBtn').addEventListener('click', () => {
+  const density = { kick: 0.25, hat: 0.5, ride: 0.15, snare: 0.2, bass: 0.3, lead: 0.25 };
+  TRACKS.forEach(t => {
+    for (let i = 0; i < 16; i++) patterns[t.id][i] = Math.random() < density[t.id];
+  });
+  renderRadial();
 });
 
 const tempoSlider = document.getElementById('tempoSlider');
